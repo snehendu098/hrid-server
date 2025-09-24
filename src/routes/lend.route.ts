@@ -129,4 +129,144 @@ lendRoutes.post("/deposit", async (c) => {
   }
 });
 
+lendRoutes.post("/withdraw", async (c) => {
+  try {
+    const requestBody = await c.req.json();
+    const { address, withdrawChain, withdrawAmount } = requestBody;
+
+    if (!address || !withdrawChain || !withdrawAmount) {
+      return c.json(
+        {
+          success: false,
+          message: "address, withdrawChain, and withdrawAmount are required",
+        },
+        400
+      );
+    }
+
+    if (withdrawChain !== "eth" && withdrawChain !== "near") {
+      return c.json(
+        {
+          success: false,
+          message: "withdrawChain must be 'eth' or 'near'",
+        },
+        400
+      );
+    }
+
+    if (withdrawAmount <= 0) {
+      return c.json(
+        {
+          success: false,
+          message: "withdrawAmount must be greater than 0",
+        },
+        400
+      );
+    }
+
+    if (!ACCOUNT_STATE[address]) {
+      return c.json(
+        {
+          success: false,
+          message: "Account not found",
+        },
+        404
+      );
+    }
+
+    const availableBalance = ACCOUNT_STATE[address].lendedBalance[withdrawChain as "eth" | "near"];
+    if (availableBalance < withdrawAmount) {
+      return c.json(
+        {
+          success: false,
+          message: `Insufficient balance. Available: ${availableBalance} ${withdrawChain.toUpperCase()}`,
+        },
+        400
+      );
+    }
+
+    ACCOUNT_STATE[address].lendedBalance[withdrawChain as "eth" | "near"] -= withdrawAmount;
+
+    return c.json({
+      success: true,
+      message: "Lend withdrawal processed successfully",
+      data: {
+        address,
+        withdrawnAmount: withdrawAmount,
+        withdrawChain,
+        remainingBalance: ACCOUNT_STATE[address].lendedBalance[withdrawChain as "eth" | "near"],
+      },
+    });
+  } catch (error) {
+    console.error("Error processing lend withdrawal:", error);
+    return c.json(
+      {
+        success: false,
+        message: "Internal server error",
+      },
+      500
+    );
+  }
+});
+
+lendRoutes.get("/earnings/:address", async (c) => {
+  try {
+    const address = c.req.param("address");
+
+    if (!address) {
+      return c.json(
+        {
+          success: false,
+          message: "address is required",
+        },
+        400
+      );
+    }
+
+    if (!ACCOUNT_STATE[address]) {
+      return c.json({
+        success: true,
+        data: {
+          address,
+          lendedBalance: { eth: 0, near: 0 },
+          projectedEarnings: { eth: 0, near: 0 },
+          totalValueUSD: 0,
+        },
+      });
+    }
+
+    const lendedBalance = ACCOUNT_STATE[address].lendedBalance;
+
+    // Calculate 3-month earnings at 5% APY
+    const projectedEarnings = {
+      eth: lendedBalance.eth * 0.05 * (3 / 12), // 5% APY for 3 months
+      near: lendedBalance.near * 0.05 * (3 / 12),
+    };
+
+    // Calculate total USD value (this would need current prices in a real implementation)
+    const totalValueUSD = 0; // Placeholder - would need price calculation
+
+    return c.json({
+      success: true,
+      data: {
+        address,
+        lendedBalance,
+        projectedEarnings,
+        annualPercentageYield: 5,
+        loanTermMonths: 3,
+        totalValueUSD,
+      },
+    });
+  } catch (error) {
+    console.error("Error retrieving lend earnings:", error);
+    return c.json(
+      {
+        success: false,
+        message: "Internal server error",
+      },
+      500
+    );
+  }
+});
+
 export default lendRoutes;

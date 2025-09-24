@@ -138,4 +138,162 @@ collateralRoutes.post("/deposit", async (c) => {
   }
 });
 
+collateralRoutes.post("/withdraw", async (c) => {
+  try {
+    const requestBody = await c.req.json();
+    const { address, collateralTxHash } = requestBody;
+
+    if (!address || !collateralTxHash) {
+      return c.json(
+        {
+          success: false,
+          message: "address and collateralTxHash are required",
+        },
+        400
+      );
+    }
+
+    if (!ACCOUNT_STATE[address]) {
+      return c.json(
+        {
+          success: false,
+          message: "Account not found",
+        },
+        404
+      );
+    }
+
+    const collateral = COLLATERAL_RECORDS[collateralTxHash];
+    if (!collateral) {
+      return c.json(
+        {
+          success: false,
+          message: "Collateral not found",
+        },
+        404
+      );
+    }
+
+    if (!ACCOUNT_STATE[address].collaterals.includes(collateralTxHash)) {
+      return c.json(
+        {
+          success: false,
+          message: "You can only withdraw your own collateral",
+        },
+        403
+      );
+    }
+
+    if (ACCOUNT_STATE[address].locked.collateral.ids.includes(collateralTxHash)) {
+      return c.json(
+        {
+          success: false,
+          message: "Collateral is locked in an active loan. Repay the loan first.",
+        },
+        400
+      );
+    }
+
+    const collateralIndex = ACCOUNT_STATE[address].collaterals.indexOf(collateralTxHash);
+    if (collateralIndex > -1) {
+      ACCOUNT_STATE[address].collaterals.splice(collateralIndex, 1);
+    }
+
+    ACCOUNT_STATE[address].collateralRemaining[collateral.chain] = Math.max(
+      0,
+      ACCOUNT_STATE[address].collateralRemaining[collateral.chain] - collateral.amount
+    );
+
+    delete COLLATERAL_RECORDS[collateralTxHash];
+
+    return c.json({
+      success: true,
+      message: "Collateral withdrawn successfully",
+      data: {
+        address,
+        withdrawnCollateral: {
+          txHash: collateralTxHash,
+          chain: collateral.chain,
+          amount: collateral.amount,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Error processing collateral withdrawal:", error);
+    return c.json(
+      {
+        success: false,
+        message: "Internal server error",
+      },
+      500
+    );
+  }
+});
+
+collateralRoutes.get("/status/:address", async (c) => {
+  try {
+    const address = c.req.param("address");
+
+    if (!address) {
+      return c.json(
+        {
+          success: false,
+          message: "address is required",
+        },
+        400
+      );
+    }
+
+    if (!ACCOUNT_STATE[address]) {
+      return c.json({
+        success: true,
+        data: {
+          address,
+          totalCollaterals: 0,
+          availableCollaterals: 0,
+          lockedCollaterals: 0,
+          collaterals: [],
+        },
+      });
+    }
+
+    const userCollaterals = ACCOUNT_STATE[address].collaterals.map((txHash) => {
+      const collateral = COLLATERAL_RECORDS[txHash];
+      const isLocked = ACCOUNT_STATE[address].locked.collateral.ids.includes(txHash);
+
+      return {
+        txHash,
+        chain: collateral?.chain || "unknown",
+        amount: collateral?.amount || 0,
+        isLocked,
+        status: isLocked ? "locked" : "available",
+      };
+    });
+
+    const availableCollaterals = userCollaterals.filter(c => !c.isLocked);
+    const lockedCollaterals = userCollaterals.filter(c => c.isLocked);
+
+    return c.json({
+      success: true,
+      data: {
+        address,
+        totalCollaterals: userCollaterals.length,
+        availableCollaterals: availableCollaterals.length,
+        lockedCollaterals: lockedCollaterals.length,
+        collaterals: userCollaterals,
+        collateralBalances: ACCOUNT_STATE[address].collateralRemaining,
+      },
+    });
+  } catch (error) {
+    console.error("Error retrieving collateral status:", error);
+    return c.json(
+      {
+        success: false,
+        message: "Internal server error",
+      },
+      500
+    );
+  }
+});
+
 export default collateralRoutes;

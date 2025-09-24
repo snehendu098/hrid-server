@@ -38,3 +38,29 @@ export interface BorrowRecord {
   chain: "eth" | "near";
   txnHash: string;
 }
+
+export interface LoanRecord {
+  id: string;
+  borrower: string;
+  collateralTxHash: string;
+  collateralChain: "eth" | "near";
+  collateralAmount: number;
+  collateralValueUSD: number;
+  borrowChain: "eth" | "near";
+  borrowAmount: number;
+  borrowValueUSD: number;
+  interestRate: 7;
+  loanTermMonths: 3;
+  interestAmount: number;
+  totalRepaymentAmount: number;
+  startTime: Date;
+  dueDate: Date;
+  status: "active" | "repaid" | "liquidated";
+  collateralRatio: 80;
+}
+
+export interface PriceData {
+  eth: number;
+  near: number;
+  lastUpdated: Date;
+}
