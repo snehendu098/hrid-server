@@ -1,50 +1,40 @@
-import { Document } from "mongoose";
+export interface chainBalance {
+  near: number;
+  eth: number;
+}
 
-export interface IUser extends Document {
+export interface AccountData {
+  borrowBalance: chainBalance;
+  collateralRemaining: chainBalance;
+  lendedBalance: chainBalance;
+  borrowedAmounts: chainBalance;
   collaterals: string[];
-  walletIds: string[];
-  borrowRecords: string[];
-  poolRecords: string[];
+  lends: string[];
+  borrow: string[];
+  locked: {
+    lends: {
+      ids: string[];
+    };
+    collateral: {
+      ids: string[];
+    };
+  };
 }
 
-export interface IWallet extends Document {
-  walletAddress: string;
-  chain: string;
-  userId: string;
-}
-
-export interface IPoolRecord extends Document {
+export interface Collateral {
   amount: number;
-  chain: string;
-  depositTxHash: string;
-  depositedBy: string;
-  amountLocked: number;
-  withdrawn: number;
-  endDate: Date;
+  txnHash: string;
+  chain: "eth" | "near";
 }
 
-export interface IPoolRecord extends Document {
+export interface LendRecord {
   amount: number;
-  chain: string;
-  depositTxHash: string;
-  depositedBy: string;
-  amountLocked: number;
-  withdrawn: number;
-  endDate: Date;
+  chain: "eth" | "near";
+  txnHash: string;
 }
 
-export interface IRepayRecord extends Document {
+export interface BorrowRecord {
   amount: number;
-  chain: string;
-  associatedBorrow: string;
-}
-
-export interface IBorrowRecord extends Document {
-  amount: number;
-  chain: string;
-  borrowTxHash: string;
-  associatedCollaterals: string[];
-  associatedPools: string[];
-  associatedRepays: string[];
-  borrowedBy: string;
+  chain: "eth" | "near";
+  txnHash: string;
 }

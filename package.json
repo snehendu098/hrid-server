@@ -5,13 +5,17 @@
     "shade": "bun shade-agent-cli"
   },
   "dependencies": {
+    "@coingecko/coingecko-typescript": "^2.0.0",
     "@near-js/accounts": "^2.3.1",
     "@near-js/tokens": "^2.3.1",
     "@neardefi/shade-agent-js": "^1.0.4",
     "axios": "^1.12.2",
+    "chainsig.js": "^1.1.13",
     "dotenv": "^17.2.2",
+    "ethers": "^6.15.0",
     "hono": "^4.9.8",
-    "mongoose": "^8.18.2"
+    "mongoose": "^8.18.2",
+    "viem": "^2.37.8"
   },
   "devDependencies": {
     "@neardefi/shade-agent-cli": "^1.0.1",
