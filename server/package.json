@@ -1,0 +1,20 @@
+{
+  "name": "server",
+  "scripts": {
+    "dev": "bun run --hot src/index.ts",
+    "shade": "bun shade-agent-cli"
+  },
+  "dependencies": {
+    "@near-js/accounts": "^2.3.1",
+    "@near-js/tokens": "^2.3.1",
+    "@neardefi/shade-agent-js": "^1.0.4",
+    "axios": "^1.12.2",
+    "dotenv": "^17.2.2",
+    "hono": "^4.9.8",
+    "mongoose": "^8.18.2"
+  },
+  "devDependencies": {
+    "@neardefi/shade-agent-cli": "^1.0.1",
+    "@types/bun": "latest"
+  }
+}
