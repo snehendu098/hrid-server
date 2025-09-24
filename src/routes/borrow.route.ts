@@ -4,6 +4,8 @@ import { initializeAccount } from "../state/state-methods";
 import { collateralExists, getCollateralValue } from "../utils/collateral";
 import { createLoan, calculateLoanSummary } from "../utils/loanManager";
 import { getCurrentPrices, calculateBorrowableTokens } from "../utils/priceOracle";
+import { lockLendFundsForLoan, unlockLendFundsForLoan, getAvailablePoolAmount } from "../utils/poolManager";
+import { canUserAccessCollateral, getAllUserAddresses } from "../utils/addressResolver";
 
 const borrowRoutes = new Hono();
 
@@ -63,15 +65,27 @@ borrowRoutes.post("/request", async (c) => {
       );
     }
 
+    // Find the actual owner of the collateral
     const collateralOwner = Object.keys(ACCOUNT_STATE).find(address =>
       ACCOUNT_STATE[address].collaterals.includes(collateralTxHash)
     );
 
-    if (!collateralOwner || collateralOwner !== borrower) {
+    if (!collateralOwner) {
       return c.json(
         {
           success: false,
-          message: "You can only borrow against your own collateral",
+          message: "Collateral owner not found",
+        },
+        404
+      );
+    }
+
+    // Check if borrower can access this collateral (direct ownership or linked addresses)
+    if (!canUserAccessCollateral(borrower, collateralOwner)) {
+      return c.json(
+        {
+          success: false,
+          message: "You can only borrow against your own collateral or collateral from linked addresses",
         },
         403
       );
@@ -101,7 +115,34 @@ borrowRoutes.post("/request", async (c) => {
       );
     }
 
+    // Check if there's sufficient liquidity in the pool
+    const availablePoolAmount = getAvailablePoolAmount(borrowChain);
+    if (borrowAmount > availablePoolAmount) {
+      return c.json(
+        {
+          success: false,
+          message: `Insufficient liquidity in ${borrowChain.toUpperCase()} pool. Available: ${availablePoolAmount.toFixed(6)} ${borrowChain.toUpperCase()}, Requested: ${borrowAmount} ${borrowChain.toUpperCase()}`,
+          availableLiquidity: availablePoolAmount,
+        },
+        400
+      );
+    }
+
     const loan = await createLoan(borrower, collateralTxHash, borrowChain, borrowAmount);
+
+    // Lock lend funds for this loan
+    try {
+      const lockIds = lockLendFundsForLoan(loan.id, borrowAmount, borrowChain);
+      console.log(`Locked ${lockIds.length} lend records for loan ${loan.id}`);
+    } catch (error) {
+      return c.json(
+        {
+          success: false,
+          message: error instanceof Error ? error.message : "Failed to lock lend funds",
+        },
+        400
+      );
+    }
 
     LOAN_RECORDS[loan.id] = loan;
 
@@ -116,7 +157,9 @@ borrowRoutes.post("/request", async (c) => {
 
     ACCOUNT_STATE[borrower].borrowedAmounts[borrowChain as "eth" | "near"] += borrowAmount;
     ACCOUNT_STATE[borrower].borrow.push(loan.id);
-    ACCOUNT_STATE[borrower].locked.collateral.ids.push(collateralTxHash);
+
+    // Lock collateral in the actual owner's account
+    ACCOUNT_STATE[collateralOwner].locked.collateral.ids.push(collateralTxHash);
 
     return c.json({
       success: true,
@@ -253,6 +296,10 @@ borrowRoutes.post("/repay", async (c) => {
 
     loan.status = "repaid";
 
+    // Unlock lend funds for this loan
+    unlockLendFundsForLoan(loanId);
+    console.log(`Unlocked lend funds for loan ${loanId}`);
+
     if (!ACCOUNT_STATE[loan.borrower]) {
       initializeAccount(loan.borrower);
     }
@@ -262,11 +309,18 @@ borrowRoutes.post("/repay", async (c) => {
       ACCOUNT_STATE[loan.borrower].borrowedAmounts[loan.borrowChain as "eth" | "near"] - loan.borrowAmount
     );
 
-    const lockedCollateralIndex = ACCOUNT_STATE[loan.borrower].locked.collateral.ids.indexOf(
-      loan.collateralTxHash
+    // Find the actual collateral owner and unlock from their account
+    const collateralOwner = Object.keys(ACCOUNT_STATE).find(address =>
+      ACCOUNT_STATE[address].locked.collateral.ids.includes(loan.collateralTxHash)
     );
-    if (lockedCollateralIndex > -1) {
-      ACCOUNT_STATE[loan.borrower].locked.collateral.ids.splice(lockedCollateralIndex, 1);
+
+    if (collateralOwner) {
+      const lockedCollateralIndex = ACCOUNT_STATE[collateralOwner].locked.collateral.ids.indexOf(
+        loan.collateralTxHash
+      );
+      if (lockedCollateralIndex > -1) {
+        ACCOUNT_STATE[collateralOwner].locked.collateral.ids.splice(lockedCollateralIndex, 1);
+      }
     }
 
     const loanSummary = calculateLoanSummary(loan);
@@ -315,8 +369,19 @@ borrowRoutes.get("/user/:address", async (c) => {
       );
     }
 
-    const userLoanIds = USER_LOANS[address] || [];
-    const userLoans = userLoanIds.map(loanId => {
+    // Get loans from all linked addresses
+    const userAddresses = getAllUserAddresses(address);
+    const allUserLoanIds: string[] = [];
+
+    for (const userAddr of userAddresses) {
+      const loanIds = USER_LOANS[userAddr] || [];
+      allUserLoanIds.push(...loanIds);
+    }
+
+    // Remove duplicates
+    const uniqueLoanIds = [...new Set(allUserLoanIds)];
+
+    const userLoans = uniqueLoanIds.map(loanId => {
       const loan = LOAN_RECORDS[loanId];
       return loan ? calculateLoanSummary(loan) : null;
     }).filter(loan => loan !== null);
@@ -325,6 +390,7 @@ borrowRoutes.get("/user/:address", async (c) => {
       success: true,
       data: {
         address,
+        linkedAddresses: userAddresses,
         totalLoans: userLoans.length,
         activeLoans: userLoans.filter(loan => loan.status === "active").length,
         loans: userLoans,

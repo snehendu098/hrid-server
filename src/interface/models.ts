@@ -31,6 +31,16 @@ export interface LendRecord {
   amount: number;
   chain: "eth" | "near";
   txnHash: string;
+  lender: string;
+  timestamp: Date;
+}
+
+export interface LendLock {
+  lendTxHash: string;
+  loanId: string;
+  amount: number;
+  chain: "eth" | "near";
+  lender: string;
 }
 
 export interface BorrowRecord {
@@ -63,4 +73,33 @@ export interface PriceData {
   eth: number;
   near: number;
   lastUpdated: Date;
+}
+
+export interface UserProfile {
+  id: string;
+  primaryAddress: string;
+  linkedAddresses: {
+    eth?: string;
+    near?: string;
+  };
+  verified: boolean;
+  createdAt: Date;
+  lastUpdated: Date;
+}
+
+export interface AddressLinkRequest {
+  ethAddress: string;
+  nearAddress: string;
+  ethSignature: string;
+  nearSignature: string;
+  timestamp: number;
+}
+
+export interface CrossChainProof {
+  ethAddress: string;
+  nearAddress: string;
+  message: string;
+  ethSignature: string;
+  nearSignature: string;
+  isValid: boolean;
 }

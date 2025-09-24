@@ -7,6 +7,8 @@ This API provides a cross-chain lending protocol supporting ETH and NEAR tokens 
 - **Lend APY**: 5% (fixed)
 - **Loan Term**: 3 months (or 3 minutes in testing mode)
 - **Collateral Ratio**: 80% (borrowers can borrow up to 80% of collateral value)
+- **Cross-Chain Support**: Deposit ETH collateral and borrow NEAR (and vice versa)
+- **Address Linking**: Link ETH and NEAR addresses for seamless cross-chain operations
 
 ## Environment Configuration
 
@@ -15,6 +17,143 @@ Set `ENVIRONMENT=testing` to enable 3-minute loan terms for testing purposes.
 ## Base URL
 ```
 http://localhost:3000
+```
+
+---
+
+## User Management Endpoints
+
+### 1. Get Link Message
+**POST** `/user/get-link-message`
+
+Generate the message that users need to sign to link their ETH and NEAR addresses.
+
+**Request Body:**
+```json
+{
+  "ethAddress": "0x742d35Cc6634C0532925a3b8D0C002C7C4Ee8100",
+  "nearAddress": "alice.near"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "message": "Link addresses: ETH 0x742d35... <-> NEAR alice.near at 1640995200000",
+    "timestamp": 1640995200000,
+    "instructions": {
+      "eth": "Sign this message with your Ethereum wallet (0x742d35...)",
+      "near": "Sign this message with your NEAR wallet (alice.near)"
+    }
+  }
+}
+```
+
+### 2. Link Addresses
+**POST** `/user/link-addresses`
+
+Link ETH and NEAR addresses with cryptographic proof of ownership.
+
+**Request Body:**
+```json
+{
+  "ethAddress": "0x742d35Cc6634C0532925a3b8D0C002C7C4Ee8100",
+  "nearAddress": "alice.near",
+  "ethSignature": "0x123...",
+  "nearSignature": "ed25519:456...",
+  "timestamp": 1640995200000
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Addresses successfully linked",
+  "data": {
+    "userId": "user_1640995200000_abc123",
+    "primaryAddress": "0x742d35Cc6634C0532925a3b8D0C002C7C4Ee8100",
+    "linkedAddresses": {
+      "eth": "0x742d35Cc6634C0532925a3b8D0C002C7C4Ee8100",
+      "near": "alice.near"
+    },
+    "verified": true
+  }
+}
+```
+
+### 3. Get User Profile
+**GET** `/user/profile/:address`
+
+Get user profile information for any linked address.
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "linked": true,
+    "userId": "user_1640995200000_abc123",
+    "primaryAddress": "0x742d35Cc6634C0532925a3b8D0C002C7C4Ee8100",
+    "linkedAddresses": {
+      "eth": "0x742d35Cc6634C0532925a3b8D0C002C7C4Ee8100",
+      "near": "alice.near"
+    },
+    "allAddresses": ["0x742d35...", "alice.near"],
+    "verified": true,
+    "createdAt": "2024-01-01T12:00:00.000Z",
+    "lastUpdated": "2024-01-01T12:00:00.000Z"
+  }
+}
+```
+
+### 4. Get Linked Address
+**GET** `/user/linked-address/:address/:targetChain`
+
+Get the linked address for a specific chain.
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "fromAddress": "0x742d35...",
+    "targetChain": "near",
+    "linkedAddress": "alice.near",
+    "hasLinkedAddress": true,
+    "userLinked": true
+  }
+}
+```
+
+### 5. List All Profiles
+**GET** `/user/profiles`
+
+Get all user profiles (for admin/debugging).
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "totalProfiles": 1,
+    "profiles": [
+      {
+        "userId": "user_1640995200000_abc123",
+        "primaryAddress": "0x742d35...",
+        "linkedAddresses": {
+          "eth": "0x742d35...",
+          "near": "alice.near"
+        },
+        "verified": true,
+        "createdAt": "2024-01-01T12:00:00.000Z",
+        "lastUpdated": "2024-01-01T12:00:00.000Z"
+      }
+    ]
+  }
+}
 ```
 
 ---
@@ -79,7 +218,7 @@ Withdraw previously lent funds.
 ### 3. Check Earnings
 **GET** `/lend/earnings/:address`
 
-View projected earnings from lending.
+View projected earnings from lending with locked vs available breakdown.
 
 **Response:**
 ```json
@@ -87,9 +226,17 @@ View projected earnings from lending.
   "success": true,
   "data": {
     "address": "0x123...",
-    "lendedBalance": {
+    "totalBalance": {
       "eth": 2.0,
       "near": 100.0
+    },
+    "availableBalance": {
+      "eth": 0.5,
+      "near": 50.0
+    },
+    "lockedBalance": {
+      "eth": 1.5,
+      "near": 50.0
     },
     "projectedEarnings": {
       "eth": 0.025,
@@ -347,6 +494,102 @@ View all loans for a user.
 
 ---
 
+## Pool Endpoints
+
+### 1. Get Pool Status
+**GET** `/pool/status`
+
+View total pool statistics across both chains.
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "timestamp": "2024-01-01T12:00:00.000Z",
+    "prices": {
+      "eth": 2000,
+      "near": 5,
+      "lastUpdated": "2024-01-01T11:55:00.000Z"
+    },
+    "pools": {
+      "eth": {
+        "total": 10.5,
+        "locked": 8.2,
+        "available": 2.3,
+        "utilizationRate": 78.1,
+        "totalUSD": 21000,
+        "lockedUSD": 16400,
+        "availableUSD": 4600
+      },
+      "near": {
+        "total": 1000,
+        "locked": 600,
+        "available": 400,
+        "utilizationRate": 60.0,
+        "totalUSD": 5000,
+        "lockedUSD": 3000,
+        "availableUSD": 2000
+      }
+    },
+    "summary": {
+      "totalUSD": 26000,
+      "lockedUSD": 19400,
+      "availableUSD": 6600,
+      "overallUtilizationRate": 74.6
+    }
+  }
+}
+```
+
+### 2. Get Chain-Specific Pool Status
+**GET** `/pool/status/:chain`
+
+View pool statistics for a specific chain.
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "chain": "eth",
+    "total": 10.5,
+    "locked": 8.2,
+    "available": 2.3,
+    "utilizationRate": 78.1,
+    "price": 2000,
+    "totalUSD": 21000,
+    "lockedUSD": 16400,
+    "availableUSD": 4600,
+    "timestamp": "2024-01-01T12:00:00.000Z"
+  }
+}
+```
+
+### 3. Check Available Liquidity
+**GET** `/pool/liquidity/:chain`
+
+Check borrowable liquidity for a specific chain.
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "chain": "eth",
+    "availableLiquidity": 2.3,
+    "totalLiquidity": 10.5,
+    "lockedLiquidity": 8.2,
+    "utilizationRate": 78.1,
+    "canBorrow": true,
+    "maxBorrowable": 2.3,
+    "timestamp": "2024-01-01T12:00:00.000Z"
+  }
+}
+```
+
+---
+
 ## Error Responses
 
 All endpoints return consistent error responses:
@@ -396,12 +639,39 @@ Set environment variable `ENVIRONMENT=testing` to enable:
 
 ---
 
-## Workflow Example
+## Workflow Examples
 
-1. **Lender deposits funds**: `POST /lend/deposit`
-2. **Borrower deposits collateral**: `POST /collateral/deposit`
-3. **Borrower requests loan**: `POST /borrow/request`
+### Same-Chain Lending (Traditional)
+1. **Lender deposits ETH**: `POST /lend/deposit`
+2. **Borrower deposits ETH collateral**: `POST /collateral/deposit`
+3. **Borrower requests ETH loan**: `POST /borrow/request`
 4. **System validates and creates loan**
-5. **Borrower repays loan**: `POST /borrow/repay`
+5. **Borrower repays ETH loan**: `POST /borrow/repay`
 6. **Collateral unlocked automatically**
 7. **Users withdraw funds**: `POST /lend/withdraw` or `POST /collateral/withdraw`
+
+### Cross-Chain Lending (Advanced)
+1. **Link addresses**:
+   - Generate message: `POST /user/get-link-message`
+   - Sign with both wallets and link: `POST /user/link-addresses`
+2. **Lender deposits NEAR**: `POST /lend/deposit` (with NEAR wallet)
+3. **Borrower deposits ETH collateral**: `POST /collateral/deposit` (with ETH wallet)
+4. **Borrower requests NEAR loan**: `POST /borrow/request` (borrower can be either address)
+   ```json
+   {
+     "borrower": "alice.near",
+     "collateralTxHash": "0x123...", // ETH collateral
+     "borrowChain": "near",          // Borrow NEAR tokens
+     "borrowAmount": 100
+   }
+   ```
+5. **System validates cross-chain access and creates loan**
+6. **Borrower repays NEAR loan**: `POST /borrow/repay` (with NEAR wallet)
+7. **ETH collateral unlocked automatically**
+8. **Users can withdraw from either linked address**
+
+### Key Cross-Chain Features:
+- **Address Linking**: One-time setup enables cross-chain operations
+- **Unified View**: Check loans/collaterals from any linked address
+- **Flexible Access**: Deposit with one wallet, borrow with another
+- **Automatic Resolution**: System handles cross-chain ownership verification

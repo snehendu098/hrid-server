@@ -1,11 +1,12 @@
 import { Hono } from "hono";
 import { INearApiResponse } from "../interface/near.explorer";
-import { ACCOUNT_STATE } from "../state/state-class";
+import { ACCOUNT_STATE, LEND_RECORDS } from "../state/state-class";
 import { initializeAccount } from "../state/state-methods";
 import { NEAR } from "@near-js/tokens";
 import { SepoliaTransactionResponse } from "../interface/sepolia.explorer";
 import { formatEther } from "viem";
 import { verifyDeposit } from "../utils/account";
+import { getUserAvailableLendBalance, getUserLockedLendBalance } from "../utils/poolManager";
 
 const lendRoutes = new Hono();
 
@@ -87,6 +88,15 @@ lendRoutes.post("/deposit", async (c) => {
       }
 
       ACCOUNT_STATE[account].lendedBalance.near += depositAmount;
+
+      // Store lend record
+      LEND_RECORDS[txHash] = {
+        amount: depositAmount,
+        chain: "near",
+        txnHash: txHash,
+        lender: account,
+        timestamp: new Date(),
+      };
     } else {
       const ethData = data as SepoliaTransactionResponse;
 
@@ -105,6 +115,15 @@ lendRoutes.post("/deposit", async (c) => {
       }
 
       ACCOUNT_STATE[account].lendedBalance.eth += depositAmount;
+
+      // Store lend record
+      LEND_RECORDS[txHash] = {
+        amount: depositAmount,
+        chain: "eth",
+        txnHash: txHash,
+        lender: account,
+        timestamp: new Date(),
+      };
     }
 
     return c.json({
@@ -174,12 +193,15 @@ lendRoutes.post("/withdraw", async (c) => {
       );
     }
 
-    const availableBalance = ACCOUNT_STATE[address].lendedBalance[withdrawChain as "eth" | "near"];
+    const totalBalance = ACCOUNT_STATE[address].lendedBalance[withdrawChain as "eth" | "near"];
+    const availableBalance = getUserAvailableLendBalance(address, withdrawChain as "eth" | "near");
+    const lockedBalance = getUserLockedLendBalance(address, withdrawChain as "eth" | "near");
+
     if (availableBalance < withdrawAmount) {
       return c.json(
         {
           success: false,
-          message: `Insufficient balance. Available: ${availableBalance} ${withdrawChain.toUpperCase()}`,
+          message: `Insufficient available balance. Total: ${totalBalance} ${withdrawChain.toUpperCase()}, Available: ${availableBalance} ${withdrawChain.toUpperCase()}, Locked: ${lockedBalance} ${withdrawChain.toUpperCase()}`,
         },
         400
       );
@@ -235,12 +257,20 @@ lendRoutes.get("/earnings/:address", async (c) => {
       });
     }
 
-    const lendedBalance = ACCOUNT_STATE[address].lendedBalance;
+    const totalBalance = ACCOUNT_STATE[address].lendedBalance;
+    const availableBalance = {
+      eth: getUserAvailableLendBalance(address, "eth"),
+      near: getUserAvailableLendBalance(address, "near"),
+    };
+    const lockedBalance = {
+      eth: getUserLockedLendBalance(address, "eth"),
+      near: getUserLockedLendBalance(address, "near"),
+    };
 
-    // Calculate 3-month earnings at 5% APY
+    // Calculate 3-month earnings at 5% APY on total balance
     const projectedEarnings = {
-      eth: lendedBalance.eth * 0.05 * (3 / 12), // 5% APY for 3 months
-      near: lendedBalance.near * 0.05 * (3 / 12),
+      eth: totalBalance.eth * 0.05 * (3 / 12), // 5% APY for 3 months
+      near: totalBalance.near * 0.05 * (3 / 12),
     };
 
     // Calculate total USD value (this would need current prices in a real implementation)
@@ -250,7 +280,9 @@ lendRoutes.get("/earnings/:address", async (c) => {
       success: true,
       data: {
         address,
-        lendedBalance,
+        totalBalance,
+        availableBalance,
+        lockedBalance,
         projectedEarnings,
         annualPercentageYield: 5,
         loanTermMonths: 3,

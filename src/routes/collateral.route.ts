@@ -6,6 +6,7 @@ import { NEAR } from "@near-js/tokens";
 import { SepoliaTransactionResponse } from "../interface/sepolia.explorer";
 import { formatEther } from "viem";
 import { verifyDeposit } from "../utils/account";
+import { canUserAccessCollateral, getAllUserAddresses } from "../utils/addressResolver";
 
 const collateralRoutes = new Hono();
 
@@ -174,11 +175,16 @@ collateralRoutes.post("/withdraw", async (c) => {
       );
     }
 
-    if (!ACCOUNT_STATE[address].collaterals.includes(collateralTxHash)) {
+    // Check if user can access this collateral (direct ownership or linked addresses)
+    const collateralOwner = Object.keys(ACCOUNT_STATE).find(addr =>
+      ACCOUNT_STATE[addr].collaterals.includes(collateralTxHash)
+    );
+
+    if (!collateralOwner || !canUserAccessCollateral(address, collateralOwner)) {
       return c.json(
         {
           success: false,
-          message: "You can only withdraw your own collateral",
+          message: "You can only withdraw your own collateral or collateral from linked addresses",
         },
         403
       );
@@ -194,14 +200,15 @@ collateralRoutes.post("/withdraw", async (c) => {
       );
     }
 
-    const collateralIndex = ACCOUNT_STATE[address].collaterals.indexOf(collateralTxHash);
-    if (collateralIndex > -1) {
-      ACCOUNT_STATE[address].collaterals.splice(collateralIndex, 1);
+    // Remove from actual collateral owner's account
+    const ownerCollateralIndex = ACCOUNT_STATE[collateralOwner].collaterals.indexOf(collateralTxHash);
+    if (ownerCollateralIndex > -1) {
+      ACCOUNT_STATE[collateralOwner].collaterals.splice(ownerCollateralIndex, 1);
     }
 
-    ACCOUNT_STATE[address].collateralRemaining[collateral.chain] = Math.max(
+    ACCOUNT_STATE[collateralOwner].collateralRemaining[collateral.chain] = Math.max(
       0,
-      ACCOUNT_STATE[address].collateralRemaining[collateral.chain] - collateral.amount
+      ACCOUNT_STATE[collateralOwner].collateralRemaining[collateral.chain] - collateral.amount
     );
 
     delete COLLATERAL_RECORDS[collateralTxHash];
@@ -244,31 +251,53 @@ collateralRoutes.get("/status/:address", async (c) => {
       );
     }
 
-    if (!ACCOUNT_STATE[address]) {
+    // Get all addresses for this user (including linked addresses)
+    const userAddresses = getAllUserAddresses(address);
+
+    // Collect collaterals from all user's addresses
+    const allUserCollaterals: any[] = [];
+    let totalCollateralBalances = { eth: 0, near: 0 };
+
+    for (const userAddr of userAddresses) {
+      if (ACCOUNT_STATE[userAddr]) {
+        const accountCollaterals = ACCOUNT_STATE[userAddr].collaterals.map((txHash) => {
+          const collateral = COLLATERAL_RECORDS[txHash];
+          const isLocked = ACCOUNT_STATE[userAddr].locked.collateral.ids.includes(txHash);
+
+          return {
+            txHash,
+            chain: collateral?.chain || "unknown",
+            amount: collateral?.amount || 0,
+            isLocked,
+            status: isLocked ? "locked" : "available",
+            ownerAddress: userAddr,
+          };
+        });
+
+        allUserCollaterals.push(...accountCollaterals);
+
+        // Add to total balances
+        totalCollateralBalances.eth += ACCOUNT_STATE[userAddr].collateralRemaining.eth;
+        totalCollateralBalances.near += ACCOUNT_STATE[userAddr].collateralRemaining.near;
+      }
+    }
+
+    if (allUserCollaterals.length === 0) {
       return c.json({
         success: true,
         data: {
           address,
+          linkedAddresses: userAddresses,
           totalCollaterals: 0,
           availableCollaterals: 0,
           lockedCollaterals: 0,
           collaterals: [],
+          collateralBalances: { eth: 0, near: 0 },
         },
       });
     }
 
-    const userCollaterals = ACCOUNT_STATE[address].collaterals.map((txHash) => {
-      const collateral = COLLATERAL_RECORDS[txHash];
-      const isLocked = ACCOUNT_STATE[address].locked.collateral.ids.includes(txHash);
-
-      return {
-        txHash,
-        chain: collateral?.chain || "unknown",
-        amount: collateral?.amount || 0,
-        isLocked,
-        status: isLocked ? "locked" : "available",
-      };
-    });
+    const userCollaterals = allUserCollaterals;
 
     const availableCollaterals = userCollaterals.filter(c => !c.isLocked);
     const lockedCollaterals = userCollaterals.filter(c => c.isLocked);
@@ -277,11 +306,12 @@ collateralRoutes.get("/status/:address", async (c) => {
       success: true,
       data: {
         address,
+        linkedAddresses: userAddresses,
         totalCollaterals: userCollaterals.length,
         availableCollaterals: availableCollaterals.length,
         lockedCollaterals: lockedCollaterals.length,
         collaterals: userCollaterals,
-        collateralBalances: ACCOUNT_STATE[address].collateralRemaining,
+        collateralBalances: totalCollateralBalances,
       },
     });
   } catch (error) {
